@@ -1,6 +1,6 @@
 {
   "name": "nimiq-settlement",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Shared Nimiq settlement core: RPC block-scan client + payment matcher/provider behind one NimiqClientLike seam. Extracted from nimiq-pos (proven live on mainnet).",
