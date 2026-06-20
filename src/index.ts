@@ -29,4 +29,10 @@ export {
   type FetchLike,
 } from "./nimiq-rpc-client";
 
+export {
+  createRpcSender,
+  type RpcSender,
+  type RpcSenderOptions,
+} from "./rpc-sender";
+
 export { MockProvider, MOCK_ADDRESS, SIMULATED_SENDER_ADDRESS } from "./mock-provider";
