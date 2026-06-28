@@ -1,5 +1,8 @@
 # nimiq-settlement
 
+<!-- nimiq-north-star -->
+> 🧭 **North Star** · Every Nimiq project aligns to one shared set of values and a single mission. See the canonical [Nimiq Values & North Star](https://github.com/Andjroo111/nimiq.life/blob/main/NORTH-STAR.md).
+
 The shared on-chain settlement core for the Nimiq app fleet. Extracted from
 `nimiq-pos` (SnapPOS), which proved this code live on mainnet. One seam, one
 proven RPC block-scan client, one matcher — so every app reads the chain the same
