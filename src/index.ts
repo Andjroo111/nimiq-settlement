@@ -9,6 +9,10 @@
 //
 // `@nimiq/core` is for OFFLINE crypto only (address/tx construction/signing) in the
 // apps; chain READS go through this package. Never import @nimiq/core/web here.
+//
+// createHtlcAwareBalance is the DISPLAY-path read: a basic balance under-reports whenever
+// Nimiq Pay has NIM locked in a swap HTLC, so a screen built on getAccountByAddress alone
+// tells solvent users they are broke. It is never a spend gate.
 
 export type { PaymentRequest, Settlement, SettlementProvider } from "./provider";
 
@@ -34,5 +38,19 @@ export {
   type RpcSender,
   type RpcSenderOptions,
 } from "./rpc-sender";
+
+export {
+  createHtlcAwareBalance,
+  compactAddress,
+  spaceAddress,
+  ACCOUNT_TYPE_HTLC,
+  type HtlcAwareBalance,
+  type HtlcBalanceOptions,
+  type HtlcBalanceReport,
+  type AddressBalance,
+  type HtlcAccount,
+  type HistoryTx,
+  type IncompleteReason,
+} from "./htlc-balance";
 
 export { MockProvider, MOCK_ADDRESS, SIMULATED_SENDER_ADDRESS } from "./mock-provider";

@@ -26,7 +26,45 @@ construction / signing), never for chain reads.
 | `NimiqClientLike`, `TxDetails` | the client seam the provider consumes (real or fake) |
 | `RpcNimiqClient` / `createRpcClient` | production client: forward block-scan over Albatross JSON-RPC |
 | `matchTransaction`, `hexToUtf8` | the pure matcher (recipient + amount guard + hex→utf8 reference) |
+| `createRpcSender` | point queries + broadcast: head height, balance, `sendRawTransaction` |
+| `createHtlcAwareBalance` | **display-path** balance that adds back NIM locked in Nimiq Pay swap HTLCs |
 | `MockProvider` | hermetic instant-settle for dev/CI |
+
+## HTLC-aware balance
+
+A Nimiq Pay user's basic account balance **under-reports**, sometimes all the way to zero,
+whenever Pay has locked their NIM in a swap HTLC. Any screen built on `getAccountByAddress`
+alone will tell a solvent user they are broke. `createHtlcAwareBalance` walks the address's
+history, finds the HTLC contracts it funded, and adds back the ones still ours.
+
+```ts
+import { createHtlcAwareBalance } from "nimiq-settlement";
+
+const balances = createHtlcAwareBalance({ url: process.env.MYAPP_RPC_URL! });
+const { totalLuna, htlcLuna, complete } = await balances.read(address);
+
+// Many addresses, with an explicit count of the ones it could not finish:
+const report = await balances.readMany(addresses);
+if (report.unreadableCount > 0) { /* the total is a floor, not a fact */ }
+```
+
+Four things to know before you wire it up:
+
+- **Display only.** Never gate a spend or a credit on it. Proving a movement by re-reading
+  both balances afterwards is strictly stronger than any balance snapshot, HTLC-aware or
+  not. `nimiq.kids#276` deleted an affordability pre-check rather than make it cleverer.
+- **Cache it yourself.** Measured on our mainnet node: `getAccountByAddress` ~0.35s,
+  `getTransactionsByAddress` **~13.3s**. That is unshippable inline on a request handler, so
+  put it behind the cache your screen already has and refresh in the background. The module
+  does no caching of its own, because the right TTL is a property of the screen.
+- **It needs a history node.** A validator or other non-history node cannot answer
+  `getTransactionsByAddress` at all, and silently returning the basic balance there is the
+  exact under-report this exists to fix. So it **throws** by default. Pass
+  `onDegraded: "report"` to get the partial read with `complete: false` and a reason instead.
+- **Ownership gate:** an HTLC counts only when its `sender` is you and its `timeout` has not
+  passed. `timeout` is a **millisecond timestamp**, not a block height (measured on mainnet;
+  the `@nimiq/core` type does not say). Expired HTLCs you funded that still hold a balance
+  are reported separately as `reclaimableLuna`, outside `totalLuna`.
 
 ## Consume it
 
