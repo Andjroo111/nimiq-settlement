@@ -30,6 +30,13 @@ construction / signing), never for chain reads.
 | `createHtlcAwareBalance` | **display-path** balance that adds back NIM locked in Nimiq Pay swap HTLCs |
 | `MockProvider` | hermetic instant-settle for dev/CI |
 
+## Planned
+
+- **Multi-provider chain watching** — one normalized tx shape behind an N-provider list, WebSocket
+  push preferred, polling as automatic fallback. Direction set 2026-08-04; design note and the
+  60-hour outage that motivates it are in [`docs/MULTI-PROVIDER.md`](docs/MULTI-PROVIDER.md).
+  Not built.
+
 ## HTLC-aware balance
 
 A Nimiq Pay user's basic account balance **under-reports**, sometimes all the way to zero,
