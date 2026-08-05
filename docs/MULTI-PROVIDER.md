@@ -10,9 +10,27 @@ no sale ever flipped to `paid`, and it stayed that way for roughly **60 hours** 
 noticed. `server.log` reached 19 MB — 218,596 identical `scan tick failed` lines — and
 `/health` returned HTTP 200 the entire time.
 
-Every app that consumes this package inherits that single point of failure today:
-nimiq.sale (23 chain-watching files), nimiq.kids (12), nimiq.school (8), and the GDKC payment
-widget. Fixing it here fixes all of them at once. Fixing it in nimiq.sale fixes one.
+Three apps inherit that single point of failure today. Fixing it here fixes all three at once;
+fixing it in nimiq.sale fixes one.
+
+| App | Chain-watching today | Inherits the failure? |
+|---|---|---|
+| **nimiq.sale** | two sources with automatic failover, shipped in #67 + #71 | Partly. Two sources, hardcoded, not a list |
+| **nimiq.kids** | one `RPC_URL` in `src/nimiq/client.ts`, no secondary, no health. **23 non-test files** import that client | **Yes, fully** |
+| **GDKC payment widget** | three rails (BTC/NIM/Polygon), each polling one hardcoded third-party endpoint on a bare `setInterval`. A failed poll is logged and swallowed | **Yes, three times over** |
+
+⚠️ **Correction 2026-08-04 (same day).** The first version of this paragraph read
+"nimiq.sale (23 chain-watching files), nimiq.kids (12), nimiq.school (8)". Checked against the
+repos: the 23 is nimiq.kids' import count, not nimiq.sale's, and **nimiq.school does not watch the
+chain at all.** It is a static Vue content site that publishes funding addresses for display and
+makes no RPC call of any kind. It is not a consumer of this package and never was, so do not scope
+work for it. The counts were plausible and wrong. Re-derive before quoting them.
+
+Worth knowing before designing the interface: the payment widget already implements this exact
+pattern correctly one directory over, in `src/utils/PriceManager.js`: a `PriceSource` base class,
+an ordered source list, and per-source failure counting against a threshold of **3**. nimiq.sale
+independently landed on the same 3 (`NIMIQ_SALE_FAILOVER_AFTER`). Two implementations of one idea
+in two repos, neither aware of the other, is the argument for this package existing.
 
 ## The pattern
 
