@@ -61,7 +61,7 @@ From **Bitrequest** (`bitrequest/bitrequest.github.io`), which runs this across 
   failover is one-way.** This package's job is to generalize #67+#71 to an N-provider list and move
   it below the app, not to start over.
 - ⚠️ nimiq.sale's fallback is armed with `NIMIQ_SALE_NIMIQ_HISTORY_RPC_URL=http://127.0.0.1:8649`,
-  which is `com.gooddogzkc.nimiq-mainnet-rpc` — the **nimiq.contracts** sidecar. That is live
+  which is a launchd-managed mainnet RPC node on the same host, the **nimiq.contracts** sidecar. That is live
   cross-project coupling: a change over there silently changes the POS's fallback. A shared
   provider list should make that dependency explicit rather than an env var nobody reads.
 - The history-indexed source measured **~43 s/query** against **~0 ms** for a head poll. It is a
