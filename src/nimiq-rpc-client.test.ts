@@ -29,6 +29,8 @@ class FakeChain {
   blocks = new Map<number, FakeTx[]>();
   consensus = true;
   calls: string[] = [];
+  /** Methods that should throw, to simulate a node that cannot answer. */
+  failing = new Set<string>();
 
   add(n: number, tx: FakeTx) {
     const list = this.blocks.get(n) ?? [];
@@ -40,17 +42,24 @@ class FakeChain {
     const body = JSON.parse(String(init?.body));
     const { method, params } = body;
     this.calls.push(method);
+    if (this.failing.has(method)) throw new Error(`fake node refused ${method}`);
     let data: unknown = null;
     if (method === "getBlockNumber") data = this.head;
     else if (method === "isConsensusEstablished") data = this.consensus;
     else if (method === "getBlockByNumber") {
       const n = params[0] as number;
       data = { number: n, transactions: this.blocks.get(n) ?? [] };
+    } else if (method === "getLatestBlock") {
+      data = { number: this.head };
+    } else if (method === "getMacroBlockAfter") {
+      // What a real node answers: the first macro block strictly after h.
+      const h = params[0] as number;
+      data = { number: Math.floor(h / 60) * 60 + 60 };
     } else if (method === "getTransactionByHash") {
       const h = params[0] as string;
       let found: FakeTx | null = null;
       for (const list of this.blocks.values()) for (const t of list) if (t.hash === h) found = t;
-      data = found ? { ...found, confirmations: this.head - found.blockNumber + 1 } : null;
+      data = found ? { ...found } : null;
     }
     return new Response(JSON.stringify({ jsonrpc: "2.0", result: { data, metadata: null }, id: 1 }), {
       status: 200,
@@ -61,12 +70,11 @@ class FakeChain {
 
 /** Build a client wired to a fake chain, with the auto-poll timer disabled so we
  *  can step scanOnce() by hand. */
-async function armed(chain: FakeChain, confirmations = 3) {
+async function armed(chain: FakeChain) {
   const fired: TxDetails[] = [];
   const client = new RpcNimiqClient({
     url: "http://fake",
     fetchImpl: chain.fetch,
-    confirmations,
     pollMs: 1e9,
     logger: { warn() {}, error() {} },
   });
@@ -101,7 +109,7 @@ describe("RpcNimiqClient", () => {
     expect(tx.data.raw).toBe(hex("snap:abc123"));
   });
 
-  test("stages 'confirmed' (paid) only once depth >= confirmations, re-verified", async () => {
+  test("stages 'confirmed' (paid) only at FINALITY, not at a depth", async () => {
     const chain = new FakeChain();
     chain.add(100, {
       hash: "bb22",
@@ -111,21 +119,86 @@ describe("RpcNimiqClient", () => {
       recipientData: hex("snap:deadbeef"),
       blockNumber: 100,
     });
-    const { fired, scan } = await armed(chain, 3);
+    const { fired, scan } = await armed(chain);
 
-    await scan(); // head=100, depth=1 -> included only
+    // tx in block 100 => its batch is closed by the macro block at 120.
+    await scan(); // head=100 -> included only
     expect(fired.map((t) => t.state)).toEqual(["included"]);
 
-    chain.head = 101;
-    await scan(); // depth=2 -> still not confirmed
+    chain.head = 110; // 11 blocks deep. The OLD gate (depth >= 3) paid here.
+    await scan();
     expect(fired.map((t) => t.state)).toEqual(["included"]);
 
-    chain.head = 102;
-    await scan(); // depth=3 >= 3 -> confirmed
+    chain.head = 119; // 20 deep, one block short of the macro block.
+    await scan();
+    expect(fired.map((t) => t.state)).toEqual(["included"]);
+
+    chain.head = 120; // the macro block after 100 exists -> settled.
+    await scan();
     expect(fired.map((t) => t.state)).toEqual(["included", "confirmed"]);
 
-    chain.head = 103;
+    chain.head = 121;
     await scan(); // no duplicate emits
+    expect(fired.map((t) => t.state)).toEqual(["included", "confirmed"]);
+  });
+
+  test("asks the node for the macro target once, then only re-polls", async () => {
+    const chain = new FakeChain();
+    chain.add(100, { hash: "cc33", from: BUYER, to: MERCHANT, value: 1, recipientData: hex("x"), blockNumber: 100 });
+    const { scan } = await armed(chain);
+    await scan();
+    chain.head = 110;
+    await scan();
+    chain.head = 115;
+    await scan();
+    expect(chain.calls.filter((c) => c === "getMacroBlockAfter").length).toBe(1);
+  });
+
+  test("a tx that turns out to have FAILED never settles and stops being watched", async () => {
+    const chain = new FakeChain();
+    const tx: FakeTx = {
+      hash: "dd44",
+      from: BUYER,
+      to: MERCHANT,
+      value: 5000,
+      recipientData: hex("snap:fail"),
+      blockNumber: 100,
+    };
+    chain.add(100, tx);
+    const { fired, scan } = await armed(chain);
+    await scan(); // seen clean, fires "included"
+    expect(fired.map((t) => t.state)).toEqual(["included"]);
+
+    // The by-hash re-verify is the only thing that can see this: it landed in a
+    // block and did NOT go through. No height comparison detects it.
+    tx.executionResult = false;
+
+    chain.head = 120; // final by height
+    await scan();
+    expect(fired.map((t) => t.state)).toEqual(["included"]);
+
+    chain.head = 200;
+    await scan();
+    expect(fired.map((t) => t.state)).toEqual(["included"]);
+    // Dropped from pending, so it is not re-checked forever.
+    const before = chain.calls.filter((c) => c === "getTransactionByHash").length;
+    await scan();
+    expect(chain.calls.filter((c) => c === "getTransactionByHash").length).toBe(before);
+  });
+
+  test("an unreadable node leaves it pending rather than reporting paid", async () => {
+    const chain = new FakeChain();
+    chain.add(100, { hash: "ee55", from: BUYER, to: MERCHANT, value: 7, recipientData: hex("y"), blockNumber: 100 });
+    const { fired, scan } = await armed(chain);
+    await scan();
+
+    chain.failing.add("getTransactionByHash");
+    chain.head = 120;
+    await scan();
+    expect(fired.map((t) => t.state)).toEqual(["included"]); // NOT paid
+
+    chain.failing.delete("getTransactionByHash"); // node recovers
+    await scan();
     expect(fired.map((t) => t.state)).toEqual(["included", "confirmed"]);
   });
 
@@ -141,7 +214,6 @@ describe("RpcNimiqClient", () => {
     const client = new RpcNimiqClient({
       url: "http://fake",
       fetchImpl: chain.fetch,
-      confirmations: 1,
       pollMs: 1e9,
       backfillBlocks: 10,
       logger: { warn() {}, error() {} },
@@ -192,7 +264,6 @@ describe("RpcNimiqClient", () => {
     const client = new RpcNimiqClient({
       url: "http://fake",
       fetchImpl: flaky,
-      confirmations: 1,
       pollMs: 1e9,
       backfillBlocks: 5,
       logger: { warn() {}, error() {} },

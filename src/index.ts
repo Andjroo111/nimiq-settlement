@@ -10,9 +10,33 @@
 // `@nimiq/core` is for OFFLINE crypto only (address/tx construction/signing) in the
 // apps; chain READS go through this package. Never import @nimiq/core/web here.
 //
+// Settlement is gated on ALBATROSS FINALITY (the macro block after the tx),
+// never on a confirmation count. `RpcClientOptions.confirmations` was removed in
+// v1.0: it could report money as paid before its batch was committed.
+//
 // createHtlcAwareBalance is the DISPLAY-path read: a basic balance under-reports whenever
 // Nimiq Pay has NIM locked in a swap HTLC, so a screen built on getAccountByAddress alone
 // tells solvent users they are broke. It is never a spend gate.
+
+export {
+  BLOCKS_PER_BATCH,
+  BATCHES_PER_EPOCH,
+  TX_VALIDITY_WINDOW_BLOCKS,
+  NETWORKS,
+  lastMacroBlock,
+  macroBlockAfter,
+  isMacroBlock,
+  isElectionBlock,
+  batchOf,
+  blocksUntilFinal,
+  finalityState,
+  createFinalityGate,
+  type NetworkName,
+  type FinalityState,
+  type FinalityRpc,
+  type FinalityGate,
+  type FinalityGateOptions,
+} from "./finality";
 
 export type { PaymentRequest, Settlement, SettlementProvider } from "./provider";
 

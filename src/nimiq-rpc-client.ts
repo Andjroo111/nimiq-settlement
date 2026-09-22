@@ -18,19 +18,23 @@
 //   - getBlockNumber() -> head height (number)
 //   - getBlockByNumber(n, true) -> block; block.transactions[] when includeTxs
 //   - isConsensusEstablished() -> boolean
+//   - getMacroBlockAfter(h) -> the macro block that settles a tx at height h
 //   - getTransactionByHash(h) -> tx (used to re-verify a payment before "paid")
 //   - tx fields read: hash, from, to, value (luna), recipientData (hex memo),
-//     confirmations, executionResult, blockNumber.
+//     executionResult, blockNumber.
 //
 // MAPPING tx JSON -> TxDetails (the shape matchTransaction reads)
 //   hash -> transactionHash ; from -> sender ; to -> recipient ;
 //   value -> value (luna) ; recipientData(hex) -> data.raw, data.type="raw".
-//   state is SYNTHESIZED from confirmation depth:
-//     first sighting in a block        -> "included"  (provider fires "detected")
-//     >= confirmations (re-verified)    -> "confirmed" (provider fires "paid")
+//   state is SYNTHESIZED from ALBATROSS FINALITY, not a confirmation depth:
+//     first sighting in a block                -> "included"  (fires "detected")
+//     macro block after it exists (re-verified) -> "confirmed" (fires "paid")
+//   A depth count answers "how long ago" and says nothing about whether the
+//   batch holding the tx was committed. See ./finality.
 //
 // NON-CUSTODIAL: read-only. We never hold keys, sign, or move funds.
 
+import { createFinalityGate, type FinalityGate } from "./finality";
 import type { NimiqClientLike, TxDetails } from "./nimiq-provider";
 
 /** Narrow fetch shape we actually use (global `fetch` is assignable to it; a
@@ -40,8 +44,16 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 export interface RpcClientOptions {
   /** Node JSON-RPC base, e.g. http://127.0.0.1:8648 */
   url: string;
-  /** Confirmation depth at which a payment is reported "paid". Default 10. */
-  confirmations?: number;
+  /**
+   * Trust local macro-block math when the node cannot answer
+   * `getMacroBlockAfter`. Default true. False makes an unanswerable node leave
+   * the payment pending rather than settle it. See ./finality.
+   *
+   * NOTE: `confirmations` was REMOVED in v1.0. A confirmation depth is not
+   * finality on Albatross and could report money as paid before its batch was
+   * committed. There is no replacement knob: finality is not tunable.
+   */
+  localFinalityFallback?: boolean;
   /** Head-poll cadence in ms. Default 1000 (Albatross ~1 block/s). */
   pollMs?: number;
   /**
@@ -84,7 +96,7 @@ interface Pending {
 
 export class RpcNimiqClient implements NimiqClientLike {
   private readonly url: string;
-  private readonly confirmations: number;
+  private readonly finality: FinalityGate;
   private readonly pollMs: number;
   private readonly startHeightOpt: number | null;
   private readonly backfillBlocks: number;
@@ -105,7 +117,6 @@ export class RpcNimiqClient implements NimiqClientLike {
 
   constructor(opts: RpcClientOptions) {
     this.url = opts.url;
-    this.confirmations = Math.max(1, opts.confirmations ?? 10);
     this.pollMs = Math.max(200, opts.pollMs ?? 1000);
     this.startHeightOpt = opts.startHeight ?? null;
     this.backfillBlocks = Math.max(0, opts.backfillBlocks ?? 0);
@@ -115,6 +126,17 @@ export class RpcNimiqClient implements NimiqClientLike {
     this.rpcTimeoutMs = Math.max(1000, opts.rpcTimeoutMs ?? 15000);
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.log = opts.logger ?? console;
+    this.finality = createFinalityGate({
+      localFallback: opts.localFinalityFallback ?? true,
+      logger: this.log,
+      rpc: {
+        getMacroBlockAfter: (h) => this.rpc("getMacroBlockAfter", [h, false]),
+        getHeadNumber: async () => {
+          const b = await this.rpc<{ number?: number } | null>("getLatestBlock", [false]);
+          return typeof b?.number === "number" ? b.number : null;
+        },
+      },
+    });
   }
 
   // ── JSON-RPC ───────────────────────────────────────────────────────────────
@@ -270,38 +292,55 @@ export class RpcNimiqClient implements NimiqClientLike {
     });
   }
 
-  /** Fire "included" (detected) then, at depth, re-verified "confirmed" (paid). */
+  /** Fire "included" (detected), then "confirmed" (paid) once the tx is FINAL. */
   private async stagePending(head: number): Promise<void> {
     for (const [hash, p] of this.pending) {
       if (!p.emittedDetected) {
         this.emit({ ...p.base, state: "included" });
         p.emittedDetected = true;
       }
-      const depth = head - p.blockNumber + 1;
-      if (depth >= this.confirmations && !p.emittedConfirmed) {
-        // Re-verify against the node before declaring paid (guards micro-fork
-        // reverts): the tx must still exist with enough confirmations.
-        const ok = await this.confirmStillIncluded(hash);
-        if (ok) {
-          this.emit({ ...p.base, state: "confirmed" });
-          p.emittedConfirmed = true;
-          this.seen.add(hash);
-          this.pending.delete(hash);
-        }
+      if (p.emittedConfirmed) continue;
+
+      // Finality, not depth: the macro block after p.blockNumber must exist.
+      // The target is asked of the node once and cached; only head moves.
+      const target = await this.finality.targetFor(p.blockNumber);
+      if (target === null || head < target) continue;
+
+      // Re-verify by hash before declaring paid. A tx can be included and still
+      // have FAILED, which no height comparison can see.
+      const verdict = await this.confirmStillIncluded(hash);
+      if (verdict === "failed") {
+        // It landed and did not go through. It can never settle; stop watching.
+        this.pending.delete(hash);
+        continue;
       }
+      // "unknown" leaves it pending so the next poll asks again. An unreadable
+      // node is not evidence that money moved.
+      if (verdict !== "ok") continue;
+
+      this.emit({ ...p.base, state: "confirmed" });
+      p.emittedConfirmed = true;
+      this.seen.add(hash);
+      this.pending.delete(hash);
     }
+    this.finality.prune(head - this.maxBlocksPerPoll);
   }
 
-  private async confirmStillIncluded(hash: string): Promise<boolean> {
+  /**
+   * Three outcomes, because "the node did not answer" is not the same as "the
+   * transaction failed" and neither is the same as "it went through".
+   */
+  private async confirmStillIncluded(hash: string): Promise<"ok" | "failed" | "unknown"> {
     try {
       const tx = await this.rpc<RpcTx | null>("getTransactionByHash", [hash]);
-      if (!tx || tx.executionResult === false) return false;
-      const confs = typeof tx.confirmations === "number" ? tx.confirmations : 0;
-      return confs >= this.confirmations;
+      if (tx?.executionResult === false) return "failed";
+      if (!tx) return "unknown";
+      return "ok";
     } catch {
-      // If the node can't answer by-hash (e.g. no history for an older tx),
-      // fall back to trusting the depth we already computed from head.
-      return true;
+      // The node could not answer by-hash (no history for an older tx, a
+      // timeout, a rate limit). Previously this returned "trust it": that is
+      // how an unreadable node got to report money as paid. Ask again instead.
+      return "unknown";
     }
   }
 
@@ -326,7 +365,6 @@ interface RpcTx {
   to?: string;
   value?: number;
   recipientData?: string;
-  confirmations?: number;
   executionResult?: boolean;
   blockNumber?: number;
 }
