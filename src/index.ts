@@ -14,6 +14,10 @@
 // never on a confirmation count. `RpcClientOptions.confirmations` was removed in
 // v1.0: it could report money as paid before its batch was committed.
 //
+// Finding a tx is three places, not one: mined, then mempool, then the expected
+// address's own history. A wallet return value is resolved to a hash or REFUSED,
+// never guessed, because guessing is what caused double-sends in the field.
+//
 // createHtlcAwareBalance is the DISPLAY-path read: a basic balance under-reports whenever
 // Nimiq Pay has NIM locked in a swap HTLC, so a screen built on getAccountByAddress alone
 // tells solvent users they are broke. It is never a spend gate.
@@ -37,6 +41,22 @@ export {
   type FinalityGate,
   type FinalityGateOptions,
 } from "./finality";
+
+export {
+  resolveHandle,
+  createLookup,
+  normalizeTx,
+  unwrapRpcResult,
+  type LookupState,
+  type LookupResult,
+  type ChainTx,
+  type Handle,
+  type Expectation,
+  type TxHashDeriver,
+  type LookupRpc,
+  type LookupOptions,
+  type Lookup,
+} from "./lookup";
 
 export type { PaymentRequest, Settlement, SettlementProvider } from "./provider";
 
