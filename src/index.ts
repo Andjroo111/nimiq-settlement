@@ -20,6 +20,12 @@
 // failure as retry / cancelled / terminal. The PENDING: wire prefix is OFF by
 // default: no app in the fleet ships a reader for it yet.
 //
+// Paying out is four independent refusals, not one check: an idempotency claim
+// taken before the chain call, an in-flight lock taken before the first await,
+// a treasury pre-flight, and an aggregate solvency invariant that survives a
+// bug anywhere upstream. The ledger is a SEAM: the bundled one is not durable
+// and says so.
+//
 // Finding a tx is three places, not one: mined, then mempool, then the expected
 // address's own history. A wallet return value is resolved to a hash or REFUSED,
 // never guessed, because guessing is what caused double-sends in the field.
@@ -82,6 +88,31 @@ export {
   type RpcTransport,
   type RpcTransportOptions,
 } from "./transport";
+
+export {
+  DEFAULT_CADENCE,
+  TreasuryKeyError,
+  TreasuryNetworkError,
+  assertSolvent,
+  assertTreasuryConfig,
+  createInMemoryLedger,
+  createPayoutGuard,
+  mayRetry,
+  nextCooldownMs,
+  preflight,
+  type Luna,
+  type PayoutRecord,
+  type LedgerLike,
+  type RetryCadence,
+  type PreflightInput,
+  type PreflightVerdict,
+  type TreasuryConfig,
+  type SolvencyInput,
+  type SolvencyVerdict,
+  type PayoutOutcome,
+  type PayoutGuard,
+  type PayoutGuardOptions,
+} from "./payout";
 
 export type { PaymentRequest, Settlement, SettlementProvider } from "./provider";
 
