@@ -114,6 +114,25 @@ export {
   type PayoutGuardOptions,
 } from "./payout";
 
+export {
+  GUARD_PREFIX,
+  NotHydratedError,
+  createReplayGuard,
+  createSendGuard,
+  guardKey,
+  matchPending,
+  type ConsumedRecord,
+  type ConsumedStore,
+  type ReplayGuard,
+  type SendIntent,
+  type PendingSend,
+  type GuardStorage,
+  type SendGuard,
+  type SendGuardOptions,
+  type ReconcileTx,
+  type ReconcileVerdict,
+} from "./resume";
+
 export type { PaymentRequest, Settlement, SettlementProvider } from "./provider";
 
 export {
