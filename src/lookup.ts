@@ -61,9 +61,22 @@ export interface LookupResult {
  *
  * ⚠️ A deriver must fork its content layout on network id. Albatross ids carry
  * a sender-data field that legacy ids omit, so the same serialized bytes hash
- * differently. Getting it wrong does not throw: it yields a valid-looking hash
- * that is never found on chain, which reads on this lane as "not settled" for
- * something that settled.
+ * differently (67 content bytes for ids 5/6/7/24, 66 for 1/2/3/4/42). Getting
+ * it wrong does not throw: it yields a valid-looking hash that is never found
+ * on chain, which reads on this lane as "not settled" for something that
+ * settled.
+ *
+ * The fleet implementation is `Andjroo111/nimiq-edge`, whose exports satisfy
+ * this interface directly:
+ *
+ *   import { transactionHash, looksLikeSerializedTransaction } from "nimiq-edge/tx";
+ *   const lookup = createLookup({ rpc, deriver: { transactionHash, looksLikeSerializedTransaction } });
+ *
+ * Wire it at the CALL SITE, not here. This package deliberately takes no
+ * dependency on it: an app that never sees a serialized handle needs no
+ * deriver, and nimiq-edge is currently private and untagged, so depending on
+ * it would mean pinning a SHA. Lockfiles pinned to a pre-rewrite settlement
+ * SHA are why four fleet apps could not install at all.
  */
 export interface TxHashDeriver {
   transactionHash(input: string): string | null;
