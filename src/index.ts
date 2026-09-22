@@ -14,6 +14,12 @@
 // never on a confirmation count. `RpcClientOptions.confirmations` was removed in
 // v1.0: it could report money as paid before its batch was committed.
 //
+// The RPC transport owns the endpoint chain, so nothing downstream hardcodes
+// rpc.nimiqwatch.com. It proves which chain a node serves before trusting it,
+// reserves against the per-IP rate budget before sending, and classifies a
+// failure as retry / cancelled / terminal. The PENDING: wire prefix is OFF by
+// default: no app in the fleet ships a reader for it yet.
+//
 // Finding a tx is three places, not one: mined, then mempool, then the expected
 // address's own history. A wallet return value is resolved to a hash or REFUSED,
 // never guessed, because guessing is what caused double-sends in the field.
@@ -57,6 +63,25 @@ export {
   type LookupOptions,
   type Lookup,
 } from "./lookup";
+
+export {
+  RPC_ENDPOINTS,
+  GENESIS_BLOCK,
+  PENDING_PREFIX,
+  RpcRefusedError,
+  toRpcAddress,
+  normaliseParams,
+  classifyRpcError,
+  pendingMessage,
+  createRateBudget,
+  createRpcTransport,
+  type ErrorClass,
+  type NetworkProof,
+  type RateBudget,
+  type RateBudgetOptions,
+  type RpcTransport,
+  type RpcTransportOptions,
+} from "./transport";
 
 export type { PaymentRequest, Settlement, SettlementProvider } from "./provider";
 
