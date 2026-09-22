@@ -297,3 +297,40 @@ describe("network proof", () => {
     expect(seen.filter((s) => s.method === "getBlockByNumber").length).toBe(1);
   });
 });
+
+describe("the dependency-free invariant", () => {
+  /**
+   * The app shell's `balance.ts` carries a standing rule: settlement asking to
+   * be a dependency gets "no". E1 is making ONE exception so the shell can
+   * import RPC_ENDPOINTS instead of hardcoding the literal, and that exception
+   * rests entirely on this file importing nothing and tree-shaking to a
+   * constant.
+   *
+   * So this is a test, not a comment. The day transport.ts grows an import,
+   * this fails here rather than as a surprise in the shell's bundle size.
+   */
+  test("transport.ts imports nothing at all", async () => {
+    const src = await Bun.file(new URL("./transport.ts", import.meta.url)).text();
+    const offenders = src
+      .split("\n")
+      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+      .filter(
+        ({ line }) =>
+          /^import\s/.test(line) ||
+          /^export\s+(\*|\{[^}]*\})\s+from\s/.test(line) ||
+          /\brequire\s*\(/.test(line) ||
+          /\bawait\s+import\s*\(/.test(line),
+      );
+    expect(offenders).toEqual([]);
+  });
+
+  test("the guard can actually fail", () => {
+    // Proves the matcher above is load-bearing rather than a regex that never fires.
+    const fake = ['import { x } from "./y";', 'const a = require("z");', 'await import("./q");'];
+    for (const line of fake) {
+      const hit =
+        /^import\s/.test(line) || /\brequire\s*\(/.test(line) || /\bawait\s+import\s*\(/.test(line);
+      expect(hit).toBe(true);
+    }
+  });
+});
