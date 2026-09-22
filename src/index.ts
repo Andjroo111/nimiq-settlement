@@ -133,6 +133,19 @@ export {
   type ReconcileVerdict,
 } from "./resume";
 
+export {
+  createInMemoryNonceStore,
+  createIntentGuard,
+  type NonceRecord,
+  type NonceStore,
+  type SignedAction,
+  type SignatureVerifier,
+  type IntentGuard,
+  type IntentGuardOptions,
+  type IntentVerdict,
+  type IntentRefusal,
+} from "./intent";
+
 export type { PaymentRequest, Settlement, SettlementProvider } from "./provider";
 
 export {
