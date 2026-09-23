@@ -93,12 +93,19 @@ export function classifyRpcError(err: unknown): ErrorClass {
  * prefix so a client keeps polling instead of showing a failure to a user whose
  * money already left.
  *
- * ⚠️ OFF BY DEFAULT, deliberately. The prefix is matched case-sensitively by the
- * reading half, and no app in the fleet ships a reader yet: they pin an
- * app-shell that predates it or vendor an older copy. A client that does not
- * know the convention reads `PENDING:` as an unrecognised error, which is the
- * hard-failure path this protocol exists to prevent. Turn it on per app only
- * once that app's client can read it.
+ * OPT-IN PER CALLER, and there is no global switch: `emit` is a required
+ * parameter so each call site states its intent.
+ *
+ * As of 2026-09-22 the fleet CAN read it. All 15 shell-dependent apps pin
+ * v0.30.0 and all 8 that vendor a browser bundle serve one rebuilt from it, so
+ * `classifySendResult` and the prefix are reachable in every served client.
+ * Before that they were not, and passing `true` would have made settlement
+ * reporting worse: a client that does not know the convention reads `PENDING:`
+ * as an unrecognised error, which is the hard-failure path this protocol
+ * exists to prevent.
+ *
+ * ⚠️ Still check the specific app before passing `true`. An app pinned to an
+ * older shell, or serving a stale cached bundle, is back in that state.
  */
 export const PENDING_PREFIX = "PENDING:";
 
